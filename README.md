@@ -16,7 +16,7 @@
 - **Human-in-the-loop**：工具级中断与人工审批
 - **安全执行**：`execute` 工具 + SandboxBackend
 - **并发安全**：线程安全设计，支持高并发
-- **零重度依赖**：仅依赖 `go-openai`，不依赖过时的 langchaingo
+- **零重度依赖**：仅依赖 `go-openai`，不依赖 langchaingo
 
 ## 项目结构
 
