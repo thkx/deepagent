@@ -18,4 +18,5 @@ type Options struct {
 	SkillsDir    string
 	HitlConfig   InterruptConfig
 	Name         string
+	Logger       Logger
 }

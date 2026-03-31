@@ -45,7 +45,7 @@ func CreateDeepAgent(opts Options) (DeepAgent, error) {
 		builtin.NewExecuteTool(opts.Backend),
 	)
 
-	graph := buildGraph(opts.LLM, allTools, systemPrompt, opts.Backend, opts.Checkpointer, opts.Memory, NewHumanInTheLoop(opts.HitlConfig))
+	graph := buildGraph(opts.LLM, allTools, systemPrompt, opts.Backend, opts.Checkpointer, opts.Memory, NewHumanInTheLoop(opts.HitlConfig), opts.Logger)
 
 	return &deepAgentImpl{
 		graph:        graph,

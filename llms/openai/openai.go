@@ -28,11 +28,35 @@ func (o *OpenAI) Invoke(ctx context.Context, msgs []llms.ChatMessage, tools []ll
 		})
 	}
 
-	// 支持 tool calling（生产级可进一步完善 JSON schema）
-	resp, err := o.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+	// Build request with tools if provided
+	req := openai.ChatCompletionRequest{
 		Model:    o.model,
 		Messages: openaiMsgs,
-	})
+	}
+
+	// Convert tools to OpenAI format if provided
+	if len(tools) > 0 {
+		var toolDefs []openai.Tool
+		for _, tool := range tools {
+			parametersSchema := llms.GenerateParametersSchema(tool)
+			toolDef := openai.Tool{
+				Type: "function",
+				Function: &openai.FunctionDefinition{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Parameters:  parametersSchema,
+				},
+			}
+			toolDefs = append(toolDefs, toolDef)
+		}
+
+		req.Tools = toolDefs
+		if len(toolDefs) > 0 {
+			req.ToolChoice = "auto"
+		}
+	}
+
+	resp, err := o.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		return "", nil, err
 	}

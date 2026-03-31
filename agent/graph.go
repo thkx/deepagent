@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/thkx/deepagent/llms"
 	"github.com/thkx/deepagent/memory"
@@ -19,12 +20,16 @@ type Graph struct {
 	checkpointer Checkpointer
 	memory       memory.Store
 	hitl         *HumanInTheLoop
+	logger       Logger
 }
 
-func buildGraph(llm llms.ChatModel, toolList []tools.Tool, prompt string, backend fs.Backend, cp Checkpointer, mem memory.Store, hitl *HumanInTheLoop) *Graph {
+func buildGraph(llm llms.ChatModel, toolList []tools.Tool, prompt string, backend fs.Backend, cp Checkpointer, mem memory.Store, hitl *HumanInTheLoop, logger Logger) *Graph {
 	toolMap := make(map[string]tools.Tool)
 	for _, t := range toolList {
 		toolMap[t.Name()] = t
+	}
+	if logger == nil {
+		logger = &NoOpLogger{}
 	}
 	return &Graph{
 		llm:          llm,
@@ -34,6 +39,7 @@ func buildGraph(llm llms.ChatModel, toolList []tools.Tool, prompt string, backen
 		checkpointer: cp,
 		memory:       mem,
 		hitl:         hitl,
+		logger:       logger,
 	}
 }
 
@@ -58,7 +64,8 @@ func (g *Graph) Run(ctx context.Context, input Input) (Output, error) {
 		state.Iteration++
 
 		// 调用 LLM（带 tool 定义）
-		content, toolCalls, err := g.llm.Invoke(ctx, convertToLLMMessages(state.Messages), nil)
+		toolList := convertToolsToLLMFormat(g.tools)
+		content, toolCalls, err := g.llm.Invoke(ctx, convertToLLMMessages(state.Messages), toolList)
 		if err != nil {
 			return nil, err
 		}
@@ -90,8 +97,24 @@ func (g *Graph) Run(ctx context.Context, input Input) (Output, error) {
 				_ = json.Unmarshal([]byte(tc.Arguments), &args)
 			}
 
-			// 执行工具
+			// 执行工具（记录时间）
+			startTime := time.Now()
 			result, callErr := tool.Call(ctx, args)
+			duration := time.Since(startTime)
+
+			// 记录工具调用
+			if g.logger != nil {
+				g.logger.LogToolCall(&ToolCallEvent{
+					Tool:      tc.Name,
+					Args:      args,
+					Result:    result,
+					Error:     callErr,
+					Duration:  duration,
+					Timestamp: startTime,
+					ThreadID:  input.ThreadID,
+				})
+			}
+
 			if callErr != nil {
 				result = fmt.Sprintf("Tool error: %v", callErr)
 			}
@@ -119,6 +142,19 @@ func convertToLLMMessages(msgs []Message) []llms.ChatMessage {
 	var res []llms.ChatMessage
 	for _, m := range msgs {
 		res = append(res, llms.ChatMessage{Role: m.Role, Content: m.Content})
+	}
+	return res
+}
+
+// convertToolsToLLMFormat converts internal tools map to LLM format with parameters
+func convertToolsToLLMFormat(toolMap map[string]tools.Tool) []llms.Tool {
+	var res []llms.Tool
+	for _, tool := range toolMap {
+		res = append(res, llms.Tool{
+			Name:        tool.Name(),
+			Description: tool.Description(),
+			Parameters:  nil, // Parameters will be inferred from tool description or tool metadata
+		})
 	}
 	return res
 }
