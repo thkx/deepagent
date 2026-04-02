@@ -9,19 +9,23 @@ import (
 )
 
 type Options struct {
-	Model         string
-	Provider      string // openai | anthropic | ollama | groq
-	APIKey        string
-	BaseURL       string
-	LLM           llms.ChatModel
-	Tools         []tools.Tool
-	SystemPrompt  string
-	Backend       fs.Backend
-	Checkpointer  Checkpointer
-	Memory        memory.Store
-	SkillsDir     string
-	HitlConfig    InterruptConfig
-	Name          string
-	Logger        Logger
-	ExecuteConfig *builtin.ExecuteConfig
+	Model                  string
+	Provider               string // openai | anthropic | ollama | groq
+	APIKey                 string
+	BaseURL                string
+	LLM                    llms.ChatModel
+	Tools                  []tools.Tool
+	SystemPrompt           string
+	Backend                fs.Backend
+	Checkpointer           Checkpointer
+	Memory                 memory.Store
+	SkillsDir              string
+	HitlConfig             InterruptConfig
+	HitlApprover           ApproverFunc
+	HitlAuditLogger        HITLAuditLogger
+	HitlAuditIncludeArgs   bool
+	HitlAuditVerifyOnStart bool
+	Name                   string
+	Logger                 Logger
+	ExecuteConfig          *builtin.ExecuteConfig
 }

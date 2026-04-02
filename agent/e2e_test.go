@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,6 +32,25 @@ func (m *resumeAwareLLM) Invoke(ctx context.Context, messages []llms.ChatMessage
 		// Resume run should load prior messages from checkpoint
 		if len(messages) < 4 {
 			return "", nil, os.ErrInvalid
+		}
+		return "second-final", nil, nil
+	default:
+		return "done", nil, nil
+	}
+}
+
+type resumeInputAwareLLM struct {
+	callIndex int
+}
+
+func (m *resumeInputAwareLLM) Invoke(ctx context.Context, messages []llms.ChatMessage, tools []llms.Tool) (string, []llms.ToolCall, error) {
+	m.callIndex++
+	switch m.callIndex {
+	case 1:
+		return "first-final", nil, nil
+	case 2:
+		if len(messages) == 0 || messages[len(messages)-1].Content != "second turn" {
+			return "", nil, fmt.Errorf("latest user input not appended on resume")
 		}
 		return "second-final", nil, nil
 	default:
@@ -87,5 +107,41 @@ func TestInvokeToolCallCheckpointResume(t *testing.T) {
 	}
 	if out2["final"] != "second-final" {
 		t.Fatalf("unexpected second final: %v", out2["final"])
+	}
+}
+
+func TestInvokeResumeAppendsNewInputMessages(t *testing.T) {
+	cpDir := t.TempDir()
+	memDir := t.TempDir()
+	backend := fs.NewInMemoryBackend()
+	model := &resumeInputAwareLLM{}
+
+	agt, err := CreateDeepAgent(Options{
+		LLM:          model,
+		Backend:      backend,
+		Checkpointer: NewFileCheckpointer(cpDir),
+		Memory:       memory.NewFileMemoryStore(memDir),
+		SystemPrompt: "You are test agent",
+	})
+	if err != nil {
+		t.Fatalf("CreateDeepAgent error: %v", err)
+	}
+
+	if _, err := agt.Invoke(context.Background(), Input{
+		ThreadID: "thread-resume-input",
+		Messages: []Message{{Role: "user", Content: "first turn"}},
+	}); err != nil {
+		t.Fatalf("first invoke error: %v", err)
+	}
+
+	out, err := agt.Invoke(context.Background(), Input{
+		ThreadID: "thread-resume-input",
+		Messages: []Message{{Role: "user", Content: "second turn"}},
+	})
+	if err != nil {
+		t.Fatalf("second invoke error: %v", err)
+	}
+	if out["final"] != "second-final" {
+		t.Fatalf("unexpected second final: %v", out["final"])
 	}
 }

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,14 +16,17 @@ import (
 )
 
 type Graph struct {
-	llm          llms.ChatModel
-	tools        map[string]tools.Tool // 工具注册表
-	prompt       string
-	backend      fs.Backend
-	checkpointer Checkpointer
-	memory       memory.Store
-	hitl         *HumanInTheLoop
-	logger       Logger
+	llm                  llms.ChatModel
+	tools                map[string]tools.Tool // 工具注册表
+	prompt               string
+	backend              fs.Backend
+	checkpointer         Checkpointer
+	memory               memory.Store
+	hitl                 *HumanInTheLoop
+	logger               Logger
+	eventSink            func(Event)
+	hitlAudit            HITLAuditLogger
+	hitlAuditIncludeArgs bool
 }
 
 func buildGraph(llm llms.ChatModel, toolList []tools.Tool, prompt string, backend fs.Backend, cp Checkpointer, mem memory.Store, hitl *HumanInTheLoop, logger Logger) *Graph {
@@ -84,12 +88,24 @@ func (g *Graph) Run(ctx context.Context, input Input) (out Output, runErr error)
 			ToolErrorRate: toolErrorRate,
 			Error:         errMsg,
 		})
+		if runErr != nil {
+			if ae, ok := runErr.(*AgentError); ok {
+				g.emit(Event{Type: "error", Content: ae.Payload()})
+			} else {
+				g.emit(Event{
+					Type: "error",
+					Content: map[string]any{
+						"message": runErr.Error(),
+					},
+				})
+			}
+		}
 	}()
 
 	// 1. 尝试从 checkpointer 恢复
 	state, exists, err := g.checkpointer.Load(input.ThreadID)
 	if err != nil {
-		runErr = err
+		runErr = wrapRunError(ErrCodeCheckpointLoad, "failed to load checkpoint", input.ThreadID, requestID, err)
 		return nil, runErr
 	}
 	if !exists {
@@ -97,9 +113,9 @@ func (g *Graph) Run(ctx context.Context, input Input) (out Output, runErr error)
 			Messages: []Message{{Role: "system", Content: g.prompt}},
 			ThreadID: input.ThreadID,
 		}
-		for _, m := range input.Messages {
-			state.Messages = append(state.Messages, m)
-		}
+	}
+	for _, m := range input.Messages {
+		state.Messages = append(state.Messages, m)
 	}
 
 	// 2. ReAct 循环（生产级：最多 20 轮 + 中断支持）
@@ -126,42 +142,157 @@ func (g *Graph) Run(ctx context.Context, input Input) (out Output, runErr error)
 			RequestID:    requestID,
 			Error:        err,
 		})
+		g.emit(Event{
+			Type: "model_call",
+			Content: map[string]any{
+				"model":      fmt.Sprintf("%T", g.llm),
+				"duration_s": modelDuration.Seconds(),
+				"iteration":  state.Iteration,
+				"error":      err != nil,
+			},
+		})
 		if err != nil {
-			runErr = err
+			runErr = wrapRunError(ErrCodeLLMInvoke, "failed to invoke llm", input.ThreadID, requestID, err)
 			return nil, runErr
 		}
 
 		// 无 tool call → 最终回答
 		if len(toolCalls) == 0 && content != "" {
 			state.Messages = append(state.Messages, Message{Role: "assistant", Content: content})
+			g.emit(Event{
+				Type: "message",
+				Content: map[string]any{
+					"role":      "assistant",
+					"content":   content,
+					"iteration": state.Iteration,
+				},
+			})
 			state.Final = content
 			_ = g.checkpointer.Save(input.ThreadID, state) // 持久化
-			out = Output{"messages": state.Messages, "final": state.Final}
+			out = Output{
+				"messages":   state.Messages,
+				"final":      state.Final,
+				"thread_id":  input.ThreadID,
+				"request_id": requestID,
+			}
+			g.emit(Event{Type: "final", Content: out})
 			return out, nil
 		}
 
 		// 3. ✅ 完整 tool calling 解析与执行
 		state.Messages = append(state.Messages, Message{Role: "assistant", Content: content})
+		if content != "" {
+			g.emit(Event{
+				Type: "message",
+				Content: map[string]any{
+					"role":      "assistant",
+					"content":   content,
+					"iteration": state.Iteration,
+				},
+			})
+		}
 		for _, tc := range toolCalls {
 			tool, ok := g.tools[tc.Name]
 			if !ok {
 				continue
 			}
 
+			g.emit(Event{
+				Type: "tool_call",
+				Content: map[string]any{
+					"tool":      tc.Name,
+					"arguments": tc.Arguments,
+					"iteration": state.Iteration,
+				},
+			})
+
 			// Human-in-the-loop 检查
 			if g.hitl.ShouldInterrupt(tc.Name) {
-				_, approvalErr := g.hitl.WaitForApproval(ctx, tc.Name, tc.Arguments)
+				g.emit(Event{
+					Type: "hitl_request",
+					Content: map[string]any{
+						"tool":         tc.Name,
+						"tool_call_id": tc.ID,
+						"iteration":    state.Iteration,
+						"thread_id":    input.ThreadID,
+						"request_id":   requestID,
+					},
+				})
+				g.logHITLAudit(HITLAuditEntry{
+					Event:      "hitl_request",
+					Tool:       tc.Name,
+					ToolCallID: tc.ID,
+					ThreadID:   input.ThreadID,
+					RequestID:  requestID,
+					Iteration:  state.Iteration,
+					Arguments:  g.auditArgsPayload(tc.Arguments),
+					ArgsHash:   hashString(tc.Arguments),
+				})
+				approvalCtx := contextWithApprovalMetadata(ctx, approvalMetadata{
+					ThreadID:   input.ThreadID,
+					RequestID:  requestID,
+					ToolCallID: tc.ID,
+					Iteration:  state.Iteration,
+				})
+				decision, approvalErr := g.hitl.WaitForApproval(approvalCtx, tc.Name, tc.Arguments)
 				if approvalErr != nil {
 					toolErrors++
+					g.emit(Event{
+						Type: "hitl_decision",
+						Content: map[string]any{
+							"tool":         tc.Name,
+							"tool_call_id": tc.ID,
+							"decision":     decision,
+							"approved":     false,
+							"error":        approvalErr.Error(),
+							"thread_id":    input.ThreadID,
+							"request_id":   requestID,
+							"iteration":    state.Iteration,
+						},
+					})
+					g.logHITLAudit(HITLAuditEntry{
+						Event:      "hitl_decision",
+						Tool:       tc.Name,
+						ToolCallID: tc.ID,
+						ThreadID:   input.ThreadID,
+						RequestID:  requestID,
+						Iteration:  state.Iteration,
+						Decision:   decision,
+						Approved:   false,
+						Error:      approvalErr.Error(),
+					})
 					rejectedResult := ToolResult{
-						Tool:  tc.Name,
-						OK:    false,
-						Error: approvalErr.Error(),
-						Code:  "hitl_rejected",
+						Tool:       tc.Name,
+						ToolCallID: tc.ID,
+						OK:         false,
+						Error:      approvalErr.Error(),
+						Code:       ToolCodeHITLRejected,
 					}
 					state.Messages = append(state.Messages, Message{Role: "tool", Content: formatToolMessage(rejectedResult)})
 					continue
 				}
+				g.emit(Event{
+					Type: "hitl_decision",
+					Content: map[string]any{
+						"tool":         tc.Name,
+						"tool_call_id": tc.ID,
+						"decision":     decision,
+						"approved":     true,
+						"thread_id":    input.ThreadID,
+						"request_id":   requestID,
+						"iteration":    state.Iteration,
+					},
+				})
+				g.logHITLAudit(HITLAuditEntry{
+					Event:      "hitl_decision",
+					Tool:       tc.Name,
+					ToolCallID: tc.ID,
+					ThreadID:   input.ThreadID,
+					RequestID:  requestID,
+					Iteration:  state.Iteration,
+					Decision:   decision,
+					Approved:   true,
+				})
 			}
 
 			// 解析参数
@@ -203,12 +334,14 @@ func (g *Graph) Run(ctx context.Context, input Input) (out Output, runErr error)
 			})
 
 			toolResult := ToolResult{
-				Tool: tc.Name,
-				OK:   callErr == nil,
+				Tool:       tc.Name,
+				ToolCallID: tc.ID,
+				OK:         callErr == nil,
 			}
+			g.emit(Event{Type: "tool_result", Content: toolResult})
 			if callErr != nil {
 				toolResult.Error = callErr.Error()
-				toolResult.Code = "tool_execution_error"
+				toolResult.Code = ToolCodeExecutionError
 			} else {
 				toolResult.Data = result
 			}
@@ -229,8 +362,44 @@ func (g *Graph) Run(ctx context.Context, input Input) (out Output, runErr error)
 		}
 	}
 
-	runErr = fmt.Errorf("max iterations reached")
+	runErr = wrapRunError(ErrCodeMaxIterations, "max iterations reached", input.ThreadID, requestID, fmt.Errorf("max iterations reached"))
 	return nil, runErr
+}
+
+func (g *Graph) emit(event Event) {
+	if g.eventSink == nil {
+		return
+	}
+	g.eventSink(event)
+}
+
+func (g *Graph) runWithEventSink(ctx context.Context, input Input, sink func(Event)) (Output, error) {
+	cloned := *g
+	cloned.eventSink = sink
+	return cloned.Run(ctx, input)
+}
+
+func (g *Graph) logHITLAudit(entry HITLAuditEntry) {
+	if g.hitlAudit == nil {
+		return
+	}
+	_ = g.hitlAudit.LogHITLEvent(entry)
+}
+
+func (g *Graph) auditArgsPayload(raw string) any {
+	if !g.hitlAuditIncludeArgs {
+		return nil
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
+		return parsed
+	}
+	return raw
+}
+
+func hashString(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return fmt.Sprintf("%x", sum)
 }
 
 func convertToLLMMessages(msgs []Message) []llms.ChatMessage {
@@ -257,7 +426,7 @@ func convertToolsToLLMFormat(toolMap map[string]tools.Tool) []llms.Tool {
 func formatToolMessage(result ToolResult) string {
 	payload, err := json.Marshal(result)
 	if err != nil {
-		return fmt.Sprintf(`{"tool":"%s","ok":false,"error":"%s","code":"serialization_error"}`, result.Tool, strings.ReplaceAll(err.Error(), `"`, `'`))
+		return fmt.Sprintf(`{"tool":"%s","ok":false,"error":"%s","code":"%s"}`, result.Tool, strings.ReplaceAll(err.Error(), `"`, `'`), ToolCodeSerialization)
 	}
 	return string(payload)
 }
@@ -268,4 +437,14 @@ func newRequestID(threadID string) string {
 		prefix = threadID
 	}
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+}
+
+func wrapRunError(code, message, threadID, requestID string, cause error) error {
+	return &AgentError{
+		Code:      code,
+		Message:   message,
+		ThreadID:  threadID,
+		RequestID: requestID,
+		Cause:     cause,
+	}
 }

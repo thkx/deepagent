@@ -13,6 +13,7 @@
 - 已完成：P2-1（Sandbox 容器隔离，支持 `process/docker/gvisor` 模式与资源/网络限制）
 - 已完成（加强版）：P2-1（新增 rootless 检查、seccomp profile 策略、镜像白名单与 cosign 签名校验）
 - 已完成（基础版）：P2-3（多模型适配：OpenAI / Anthropic / Ollama / Groq）
+- 已完成：Memory 多后端编译链路修复（redis/sqlite/prometheus 相关依赖与构建路径）
 
 ## P0（上线前必须）
 

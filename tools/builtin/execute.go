@@ -44,10 +44,16 @@ func NewExecuteToolWithConfig(backend fs.Backend, cfg *ExecuteConfig) tools.Tool
 			}
 
 			output, err := sandbox.Execute(ctx, cmd)
+			if err != nil {
+				if output != "" {
+					return nil, fmt.Errorf("execute failed: %w; output: %s", err, output)
+				}
+				return nil, fmt.Errorf("execute failed: %w", err)
+			}
 			return map[string]any{
 				"command": cmd,
 				"output":  output,
-				"error":   err != nil,
+				"error":   false,
 			}, nil
 		},
 	)

@@ -37,6 +37,22 @@ func CreateDeepAgent(opts Options) (DeepAgent, error) {
 	if opts.HitlConfig == nil {
 		opts.HitlConfig = make(InterruptConfig)
 	}
+	hitlAuditVerifyOnStart := opts.HitlAuditVerifyOnStart || strings.EqualFold(strings.TrimSpace(os.Getenv("DEEPAGENT_HITL_AUDIT_VERIFY_ON_START")), "true")
+	hitlAuditIncludeArgs := opts.HitlAuditIncludeArgs || strings.EqualFold(strings.TrimSpace(os.Getenv("DEEPAGENT_HITL_AUDIT_INCLUDE_ARGS")), "true")
+	if opts.HitlAuditLogger == nil {
+		if path := strings.TrimSpace(os.Getenv("DEEPAGENT_HITL_AUDIT_FILE")); path != "" {
+			if hitlAuditVerifyOnStart {
+				if err := VerifyHITLAuditFileChain(path); err != nil && !os.IsNotExist(err) {
+					return nil, fmt.Errorf("hitl audit chain verification failed: %w", err)
+				}
+			}
+			auditLogger, err := NewFileHITLAuditLogger(path)
+			if err != nil {
+				return nil, fmt.Errorf("failed to initialize hitl audit logger: %w", err)
+			}
+			opts.HitlAuditLogger = auditLogger
+		}
+	}
 
 	skillsLoader := builtin.NewSkillsLoader(opts.SkillsDir)
 	systemPrompt := opts.SystemPrompt + "\n\n" + skillsLoader.GetAllSkillsContext()
@@ -53,7 +69,18 @@ func CreateDeepAgent(opts Options) (DeepAgent, error) {
 		builtin.NewExecuteToolWithConfig(opts.Backend, opts.ExecuteConfig),
 	)
 
-	graph := buildGraph(opts.LLM, allTools, systemPrompt, opts.Backend, opts.Checkpointer, opts.Memory, NewHumanInTheLoop(opts.HitlConfig), opts.Logger)
+	graph := buildGraph(
+		opts.LLM,
+		allTools,
+		systemPrompt,
+		opts.Backend,
+		opts.Checkpointer,
+		opts.Memory,
+		NewHumanInTheLoopWithApprover(opts.HitlConfig, opts.HitlApprover),
+		opts.Logger,
+	)
+	graph.hitlAudit = opts.HitlAuditLogger
+	graph.hitlAuditIncludeArgs = hitlAuditIncludeArgs
 
 	return &deepAgentImpl{
 		graph:        graph,
@@ -158,12 +185,13 @@ func (a *deepAgentImpl) Stream(ctx context.Context, input Input) (<-chan Event, 
 	ch := make(chan Event, 32)
 	go func() {
 		defer close(ch)
-		out, err := a.Invoke(ctx, input)
+		_, err := a.graph.runWithEventSink(ctx, input, func(event Event) {
+			ch <- event
+		})
 		if err != nil {
-			ch <- Event{Type: "error", Content: err.Error()}
+			// error event is emitted from graph defer
 			return
 		}
-		ch <- Event{Type: "final", Content: out}
 	}()
 	return ch, nil
 }

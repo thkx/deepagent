@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/thkx/deepagent/llms"
@@ -113,5 +114,16 @@ func TestRunSkipsToolExecutionWhenHitlRejects(t *testing.T) {
 	}
 	if out["final"] != "final answer" {
 		t.Fatalf("unexpected final output: %v", out["final"])
+	}
+}
+
+func TestFormatToolMessageSerializationFallbackUsesConstantCode(t *testing.T) {
+	msg := formatToolMessage(ToolResult{
+		Tool: "test_tool",
+		OK:   true,
+		Data: func() {},
+	})
+	if !strings.Contains(msg, ToolCodeSerialization) {
+		t.Fatalf("expected serialization code %q in fallback message, got: %s", ToolCodeSerialization, msg)
 	}
 }

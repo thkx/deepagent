@@ -1,6 +1,9 @@
 package agent
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 type Message struct {
 	Role    string `json:"role"`
@@ -15,11 +18,49 @@ type Input struct {
 type Output map[string]any // 兼容 Python {"messages": [...]}
 
 type ToolResult struct {
-	Tool  string `json:"tool"`
-	OK    bool   `json:"ok"`
-	Data  any    `json:"data,omitempty"`
-	Error string `json:"error,omitempty"`
-	Code  string `json:"code,omitempty"`
+	Tool       string `json:"tool"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	OK         bool   `json:"ok"`
+	Data       any    `json:"data,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Code       string `json:"code,omitempty"`
+}
+
+type AgentError struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	ThreadID  string `json:"thread_id,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+	Cause     error  `json:"-"`
+}
+
+func (e *AgentError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.RequestID != "" {
+		return fmt.Sprintf("%s (code=%s thread=%s request=%s)", e.Message, e.Code, e.ThreadID, e.RequestID)
+	}
+	return fmt.Sprintf("%s (code=%s)", e.Message, e.Code)
+}
+
+func (e *AgentError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func (e *AgentError) Payload() map[string]any {
+	if e == nil {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"code":       e.Code,
+		"message":    e.Message,
+		"thread_id":  e.ThreadID,
+		"request_id": e.RequestID,
+	}
 }
 
 type Event struct {

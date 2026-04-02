@@ -229,3 +229,32 @@ func TestContextLoggerModelAndSummary(t *testing.T) {
 		t.Fatalf("expected 1 run summary, got %d", len(logger.RunSummaries()))
 	}
 }
+
+type fakeMetricsProvider struct{}
+
+func (f *fakeMetricsProvider) RecordToolCall(event *ToolCallEvent)     {}
+func (f *fakeMetricsProvider) RecordModelCall(event *ModelCallEvent)   {}
+func (f *fakeMetricsProvider) RecordRunSummary(event *RunSummaryEvent) {}
+func (f *fakeMetricsProvider) Metrics() any                            { return "registry-handle" }
+
+type fakeMetricsCollector struct{}
+
+func (f *fakeMetricsCollector) RecordToolCall(event *ToolCallEvent)     {}
+func (f *fakeMetricsCollector) RecordModelCall(event *ModelCallEvent)   {}
+func (f *fakeMetricsCollector) RecordRunSummary(event *RunSummaryEvent) {}
+
+func TestGetPrometheusRegistry(t *testing.T) {
+	if got := GetPrometheusRegistry(nil); got != nil {
+		t.Fatalf("expected nil for nil metrics, got %v", got)
+	}
+
+	mp := &fakeMetricsProvider{}
+	if got := GetPrometheusRegistry(mp); got != "registry-handle" {
+		t.Fatalf("expected registry-handle, got %v", got)
+	}
+
+	plain := &fakeMetricsCollector{}
+	if got := GetPrometheusRegistry(plain); got != nil {
+		t.Fatalf("expected nil for non-provider metrics collector, got %v", got)
+	}
+}

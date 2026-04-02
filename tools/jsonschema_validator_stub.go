@@ -1,3 +1,6 @@
+//go:build !jsonschema
+// +build !jsonschema
+
 package tools
 
 // This is the default (no-op / lightweight fallback) implementation of
@@ -5,5 +8,5 @@ package tools
 // ValidateAgainstSchema logic so builds without the `jsonschema` tag or
 // without network access continue to work.
 func ValidateAgainstJSONSchema(schema map[string]any, args map[string]any) error {
-    return ValidateAgainstSchema(schema, args)
+	return ValidateAgainstSchema(schema, args)
 }

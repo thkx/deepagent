@@ -96,13 +96,20 @@ func (a *Anthropic) Invoke(ctx context.Context, messages []llms.ChatMessage, too
 				},
 			})
 		case "tool":
-			// Anthropic requires tool_result blocks with tool_use_id. We map tool output as user text.
-			reqBody.Messages = append(reqBody.Messages, requestMessage{
-				Role: "user",
-				Content: []map[string]any{
-					{"type": "text", "text": "Tool result: " + m.Content},
-				},
-			})
+			if block, ok := parseToolResultBlock(m.Content); ok {
+				reqBody.Messages = append(reqBody.Messages, requestMessage{
+					Role:    "user",
+					Content: []map[string]any{block},
+				})
+			} else {
+				// Fallback for legacy tool message format.
+				reqBody.Messages = append(reqBody.Messages, requestMessage{
+					Role: "user",
+					Content: []map[string]any{
+						{"type": "text", "text": "Tool result: " + m.Content},
+					},
+				})
+			}
 		}
 	}
 	for _, t := range tools {
@@ -149,6 +156,7 @@ func (a *Anthropic) Invoke(ctx context.Context, messages []llms.ChatMessage, too
 		case "tool_use":
 			args, _ := json.Marshal(block.Input)
 			toolCalls = append(toolCalls, llms.ToolCall{
+				ID:        block.ID,
 				Name:      block.Name,
 				Arguments: string(args),
 			})
@@ -162,4 +170,40 @@ func (a *Anthropic) Invoke(ctx context.Context, messages []llms.ChatMessage, too
 		return "", toolCalls, nil
 	}
 	return strings.Join(textParts, "\n"), nil, nil
+}
+
+func parseToolResultBlock(content string) (map[string]any, bool) {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return nil, false
+	}
+	toolUseID, _ := payload["tool_call_id"].(string)
+	if strings.TrimSpace(toolUseID) == "" {
+		return nil, false
+	}
+
+	ok, _ := payload["ok"].(bool)
+	resultContent := ""
+	if ok {
+		if data, exists := payload["data"]; exists {
+			b, _ := json.Marshal(data)
+			resultContent = string(b)
+		} else {
+			resultContent = "ok"
+		}
+	} else {
+		if e, _ := payload["error"].(string); strings.TrimSpace(e) != "" {
+			resultContent = e
+		} else {
+			resultContent = "tool execution failed"
+		}
+	}
+
+	return map[string]any{
+		"type":        "tool_result",
+		"tool_use_id": toolUseID,
+		"content": []map[string]any{
+			{"type": "text", "text": resultContent},
+		},
+	}, true
 }

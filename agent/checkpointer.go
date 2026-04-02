@@ -2,8 +2,10 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -29,6 +31,9 @@ func NewFileCheckpointer(dir string) Checkpointer {
 func (c *FileCheckpointer) Save(threadID string, state State) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := validatePathComponent(threadID, "thread_id"); err != nil {
+		return err
+	}
 
 	path := filepath.Join(c.Dir, threadID+".json")
 	data, err := json.MarshalIndent(state, "", "  ")
@@ -41,6 +46,9 @@ func (c *FileCheckpointer) Save(threadID string, state State) error {
 func (c *FileCheckpointer) Load(threadID string) (State, bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := validatePathComponent(threadID, "thread_id"); err != nil {
+		return State{}, false, err
+	}
 
 	path := filepath.Join(c.Dir, threadID+".json")
 	data, err := os.ReadFile(path)
@@ -56,4 +64,21 @@ func (c *FileCheckpointer) Load(threadID string) (State, bool, error) {
 		return State{}, false, err
 	}
 	return state, true, nil
+}
+
+func validatePathComponent(v, field string) error {
+	if v == "" {
+		return nil
+	}
+	if filepath.IsAbs(v) {
+		return fmt.Errorf("%s must not be an absolute path", field)
+	}
+	if strings.ContainsAny(v, `/\`) || strings.Contains(v, "..") {
+		return fmt.Errorf("unsafe %s: %q", field, v)
+	}
+	clean := filepath.Clean(v)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "..") {
+		return fmt.Errorf("unsafe %s: %q", field, v)
+	}
+	return nil
 }

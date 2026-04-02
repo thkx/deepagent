@@ -77,6 +77,7 @@ func (o *OpenAI) Invoke(ctx context.Context, msgs []llms.ChatMessage, tools []ll
 		var calls []llms.ToolCall
 		for _, tc := range choice.ToolCalls {
 			calls = append(calls, llms.ToolCall{
+				ID:        tc.ID,
 				Name:      tc.Function.Name,
 				Arguments: tc.Function.Arguments,
 			})
