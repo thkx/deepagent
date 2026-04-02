@@ -19,7 +19,7 @@ func GeneratePropertySchema(t reflect.Type) map[string]any {
 		return map[string]any{"type": "boolean"}
 	case reflect.Slice, reflect.Array:
 		return map[string]any{
-			"type": "array",
+			"type":  "array",
 			"items": GeneratePropertySchema(t.Elem()),
 		}
 	case reflect.Struct:

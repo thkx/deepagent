@@ -7,10 +7,10 @@ import (
 
 func TestValidateRequired(t *testing.T) {
 	tests := []struct {
-		name           string
-		args           map[string]any
-		requiredKeys   []string
-		shouldPass     bool
+		name         string
+		args         map[string]any
+		requiredKeys []string
+		shouldPass   bool
 	}{
 		{
 			name:         "all required params present",
@@ -45,38 +45,38 @@ func TestValidateRequired(t *testing.T) {
 
 func TestValidateType(t *testing.T) {
 	tests := []struct {
-		name      string
-		args      map[string]any
-		key       string
-		typ       string
+		name       string
+		args       map[string]any
+		key        string
+		typ        string
 		shouldPass bool
 	}{
 		{
-			name:      "valid string type",
-			args:      map[string]any{"path": "/tmp"},
-			key:       "path",
-			typ:       "string",
+			name:       "valid string type",
+			args:       map[string]any{"path": "/tmp"},
+			key:        "path",
+			typ:        "string",
 			shouldPass: true,
 		},
 		{
-			name:      "invalid string type",
-			args:      map[string]any{"count": 42},
-			key:       "count",
-			typ:       "string",
+			name:       "invalid string type",
+			args:       map[string]any{"count": 42},
+			key:        "count",
+			typ:        "string",
 			shouldPass: false,
 		},
 		{
-			name:      "valid number type",
-			args:      map[string]any{"count": 42.0},
-			key:       "count",
-			typ:       "number",
+			name:       "valid number type",
+			args:       map[string]any{"count": 42.0},
+			key:        "count",
+			typ:        "number",
 			shouldPass: true,
 		},
 		{
-			name:      "valid boolean type",
-			args:      map[string]any{"enabled": true},
-			key:       "enabled",
-			typ:       "boolean",
+			name:       "valid boolean type",
+			args:       map[string]any{"enabled": true},
+			key:        "enabled",
+			typ:        "boolean",
 			shouldPass: true,
 		},
 	}

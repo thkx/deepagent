@@ -138,6 +138,10 @@ func (wt *WrappedTool) Description() string {
 	return wt.tool.Description()
 }
 
+func (wt *WrappedTool) Parameters() any {
+	return wt.tool.Parameters()
+}
+
 func (wt *WrappedTool) Call(ctx context.Context, args map[string]any) (any, error) {
 	// Run validators first
 	if wt.validators != nil {
@@ -147,4 +151,84 @@ func (wt *WrappedTool) Call(ctx context.Context, args map[string]any) (any, erro
 	}
 	// If validation passes, call the wrapped tool
 	return wt.tool.Call(ctx, args)
+}
+
+// ValidateAgainstSchema validates args against a simple JSON-schema-like map
+// produced by llms.GenerateParametersSchema. This is intentionally lightweight
+// and only checks required fields and primitive types (string, number,
+// boolean, array, object).
+func ValidateAgainstSchema(schema map[string]any, args map[string]any) error {
+	if schema == nil {
+		return nil
+	}
+
+	t, _ := schema["type"].(string)
+	if t != "object" {
+		return nil
+	}
+
+	props, _ := schema["properties"].(map[string]any)
+
+	// required list
+	required := map[string]bool{}
+	if reqList, ok := schema["required"].([]any); ok {
+		for _, r := range reqList {
+			if s, ok := r.(string); ok {
+				required[s] = true
+			}
+		}
+	}
+
+	// Check required fields
+	for req := range required {
+		if args == nil {
+			return fmt.Errorf("missing required parameter: %s", req)
+		}
+		if _, ok := args[req]; !ok {
+			return fmt.Errorf("missing required parameter: %s", req)
+		}
+	}
+
+	// Basic type checks
+	for key, v := range props {
+		propSchema, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		expectedType, _ := propSchema["type"].(string)
+		if args == nil {
+			continue
+		}
+		val, exists := args[key]
+		if !exists {
+			continue
+		}
+		switch expectedType {
+		case "string":
+			if _, ok := val.(string); !ok {
+				return fmt.Errorf("parameter %s must be a string", key)
+			}
+		case "number":
+			switch val.(type) {
+			case float64, int, int32, int64, float32:
+				// ok
+			default:
+				return fmt.Errorf("parameter %s must be a number", key)
+			}
+		case "boolean":
+			if _, ok := val.(bool); !ok {
+				return fmt.Errorf("parameter %s must be a boolean", key)
+			}
+		case "array":
+			if _, ok := val.([]any); !ok {
+				return fmt.Errorf("parameter %s must be an array", key)
+			}
+		case "object":
+			if _, ok := val.(map[string]any); !ok {
+				return fmt.Errorf("parameter %s must be an object", key)
+			}
+		}
+	}
+
+	return nil
 }

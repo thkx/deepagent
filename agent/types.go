@@ -14,6 +14,14 @@ type Input struct {
 
 type Output map[string]any // 兼容 Python {"messages": [...]}
 
+type ToolResult struct {
+	Tool  string `json:"tool"`
+	OK    bool   `json:"ok"`
+	Data  any    `json:"data,omitempty"`
+	Error string `json:"error,omitempty"`
+	Code  string `json:"code,omitempty"`
+}
+
 type Event struct {
 	Type    string `json:"type"` // "message", "tool_call", "todo_update", "final", "error"
 	Content any    `json:"content"`

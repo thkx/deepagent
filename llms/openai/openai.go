@@ -19,6 +19,17 @@ func New(apiKey, model string) *OpenAI {
 	}
 }
 
+func NewWithBaseURL(apiKey, model, baseURL string) *OpenAI {
+	cfg := openai.DefaultConfig(apiKey)
+	if baseURL != "" {
+		cfg.BaseURL = baseURL
+	}
+	return &OpenAI{
+		client: openai.NewClientWithConfig(cfg),
+		model:  model,
+	}
+}
+
 func (o *OpenAI) Invoke(ctx context.Context, msgs []llms.ChatMessage, tools []llms.Tool) (string, []llms.ToolCall, error) {
 	var openaiMsgs []openai.ChatCompletionMessage
 	for _, m := range msgs {
