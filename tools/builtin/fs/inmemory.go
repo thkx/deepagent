@@ -2,6 +2,7 @@ package fs
 
 import (
 	"context"
+	"os"
 	"sync"
 )
 
@@ -30,7 +31,7 @@ func (b *InMemoryBackend) Read(ctx context.Context, path string) (string, error)
 	if c, ok := b.files[path]; ok {
 		return c, nil
 	}
-	return "", nil
+	return "", os.ErrNotExist
 }
 
 func (b *InMemoryBackend) Write(ctx context.Context, path, content string) error {

@@ -35,8 +35,16 @@ func (l *SkillsLoader) loadAll() {
 }
 
 func NewLoadSkillsTool(loader *SkillsLoader) tools.Tool {
-	return tools.NewTool("load_skill",
+	return tools.NewToolWithParameters("load_skill",
 		"Load a skill from the skills directory by name.",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{"type": "string"},
+			},
+			"required":             []string{"name"},
+			"additionalProperties": false,
+		},
 		func(ctx context.Context, args map[string]any) (any, error) {
 			name, ok := args["name"].(string)
 			if !ok || name == "" {

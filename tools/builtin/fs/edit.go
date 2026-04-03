@@ -7,9 +7,18 @@ import (
 )
 
 func NewEditFileTool(backend Backend) tools.Tool {
-	return tools.NewTool(
+	return tools.NewToolWithParameters(
 		"edit_file",
 		"Edit a file using natural language instructions (LLM-assisted). Args: path (required), instructions (required)",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":         map[string]any{"type": "string"},
+				"instructions": map[string]any{"type": "string"},
+			},
+			"required":             []string{"path", "instructions"},
+			"additionalProperties": false,
+		},
 		func(ctx context.Context, args map[string]any) (any, error) {
 			path, ok1 := args["path"].(string)
 			instructions, ok2 := args["instructions"].(string)

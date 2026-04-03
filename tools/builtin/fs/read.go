@@ -7,9 +7,17 @@ import (
 )
 
 func NewReadFileTool(backend Backend) tools.Tool {
-	return tools.NewTool(
+	return tools.NewToolWithParameters(
 		"read_file",
 		"Read the content of a file. Args: path (required)",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string"},
+			},
+			"required":             []string{"path"},
+			"additionalProperties": false,
+		},
 		func(ctx context.Context, args map[string]any) (any, error) {
 			path, ok := args["path"].(string)
 			if !ok || path == "" {

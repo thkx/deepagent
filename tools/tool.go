@@ -9,21 +9,28 @@ import (
 type Tool interface {
 	Name() string
 	Description() string
+	Parameters() any
 	Call(ctx context.Context, args map[string]any) (any, error)
 }
 
 type FuncTool struct {
 	name        string
 	description string
+	parameters  any
 	fn          func(ctx context.Context, args map[string]any) (any, error)
 }
 
 func NewTool(name, desc string, fn func(ctx context.Context, args map[string]any) (any, error)) Tool {
-	return &FuncTool{name: name, description: desc, fn: fn}
+	return &FuncTool{name: name, description: desc, parameters: nil, fn: fn}
+}
+
+func NewToolWithParameters(name, desc string, parameters any, fn func(ctx context.Context, args map[string]any) (any, error)) Tool {
+	return &FuncTool{name: name, description: desc, parameters: parameters, fn: fn}
 }
 
 func (t *FuncTool) Name() string        { return t.name }
 func (t *FuncTool) Description() string { return t.description }
+func (t *FuncTool) Parameters() any     { return t.parameters }
 func (t *FuncTool) Call(ctx context.Context, args map[string]any) (any, error) {
 	return t.fn(ctx, args)
 }
@@ -44,6 +51,7 @@ func WithTimeout(tool Tool, timeout time.Duration) Tool {
 
 func (t *TimeoutTool) Name() string        { return t.tool.Name() }
 func (t *TimeoutTool) Description() string { return t.tool.Description() }
+func (t *TimeoutTool) Parameters() any     { return t.tool.Parameters() }
 
 func (t *TimeoutTool) Call(ctx context.Context, args map[string]any) (any, error) {
 	if t.timeout <= 0 {

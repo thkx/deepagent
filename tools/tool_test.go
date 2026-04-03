@@ -8,27 +8,27 @@ import (
 
 func TestWithTimeout(t *testing.T) {
 	tests := []struct {
-		name         string
-		toolDelay    time.Duration
-		timeout      time.Duration
+		name          string
+		toolDelay     time.Duration
+		timeout       time.Duration
 		shouldTimeout bool
 	}{
 		{
-			name:         "tool completes before timeout",
-			toolDelay:    100 * time.Millisecond,
-			timeout:      500 * time.Millisecond,
+			name:          "tool completes before timeout",
+			toolDelay:     100 * time.Millisecond,
+			timeout:       500 * time.Millisecond,
 			shouldTimeout: false,
 		},
 		{
-			name:         "tool exceeds timeout",
-			toolDelay:    500 * time.Millisecond,
-			timeout:      100 * time.Millisecond,
+			name:          "tool exceeds timeout",
+			toolDelay:     500 * time.Millisecond,
+			timeout:       100 * time.Millisecond,
 			shouldTimeout: true,
 		},
 		{
-			name:         "zero timeout disabled",
-			toolDelay:    200 * time.Millisecond,
-			timeout:      0,
+			name:          "zero timeout disabled",
+			toolDelay:     200 * time.Millisecond,
+			timeout:       0,
 			shouldTimeout: false,
 		},
 	}

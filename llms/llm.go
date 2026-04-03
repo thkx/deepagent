@@ -8,6 +8,7 @@ type ChatMessage struct {
 }
 
 type ToolCall struct {
+	ID        string
 	Name      string
 	Arguments string // JSON string
 }
